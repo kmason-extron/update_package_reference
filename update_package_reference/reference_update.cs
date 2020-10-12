@@ -19,6 +19,7 @@ namespace update_package_reference
     {
         bool parseErr = false;
 
+        // Obfuscating this will break the commandline parser
         [ObfuscationAttribute(Exclude = true, ApplyToMembers = true)]
         internal class FWUpdateCLIOptions
         {
@@ -41,26 +42,29 @@ namespace update_package_reference
             public bool DryRun { get; set; }
         }
 
+        // Called when there is a problem parsing CLI parameters
         void HandleParseError(IEnumerable<Error> errs)
         {
             if (errs.Any(x => x is HelpRequestedError)) //|| x is VersionRequestedError))
             {
                 Console.WriteLine("Example:\n");
-                Console.WriteLine(@"    update_package_reference -t Keyword -p My.Nuget.Package -c c:\projects\Core\MyProj\*.csproj -s https://extron.jfrog.io/extron/api/nuget/nuget-test -v -d");
+                Console.WriteLine(@"    update_package_reference -t searchtag -p My.Nuget.Package -c c:\projects\Control\SuperConfig\*.csproj -s https://extron.jfrog.io/extron/api/nuget/nuget-test -v -dryrun");
                 Console.WriteLine("");
             }
             parseErr = true;
         }
 
+        // The app needs to query the repo to find the latest version of the desired package.
+        // Search results consist of a package name (ID) and a version.  This class contains that information.
         class MatchingPackage
         {
             string verStr;
             Version ver;
 
-            public MatchingPackage() { verStr = ""; ver = new Version(); }
+            internal MatchingPackage() { verStr = ""; ver = new Version(); }
 
-            public string PackageName { set; get; }
-            public string PackageVersionStr
+            internal string PackageName { set; get; }
+            internal string PackageVersionStr
             {
                 set
                 {
@@ -73,7 +77,7 @@ namespace update_package_reference
                 }
             }
 
-            public Version PackageVersion
+            internal Version PackageVersion
             {
                 get
                 {
@@ -83,7 +87,7 @@ namespace update_package_reference
 
         }
 
-        public int Run(string[] args)
+        internal int Run(string[] args)
         {
             int retVal = 0;
 
@@ -118,7 +122,7 @@ namespace update_package_reference
             {
                 if (verbose)
                 {
-                    Console.Write("Searching for package {0} with tag {1}");
+                    Console.Write("Searching for package {0} with tag {1}", packageName, searchTag);
                     if ( String.IsNullOrEmpty(sourceRepo) == false)
                     {
                         Console.Write(", looking in {0}", sourceRepo);
@@ -126,11 +130,11 @@ namespace update_package_reference
                     Console.Write("\n");
                 }
 
+                // Step 1 - search the repo for the desired package using the provided search tag (and optional source URI).
+                //          This can take a notable amound of time - thus the stopwatch for verbose mode time reports.
                 Stopwatch stopWatch = new Stopwatch();
                 stopWatch.Start();
-
                 string packageList = GetRawPackageList(searchTag, sourceRepo);
-
                 stopWatch.Stop();
 
                 if (verbose)
@@ -157,7 +161,6 @@ namespace update_package_reference
                         {
                             Console.WriteLine("Could not parse {0} - discarding", packageName);
                         }
-                        continue;
                     }
                 }
 
@@ -173,8 +176,9 @@ namespace update_package_reference
                         Console.WriteLine("Found {0} matching packages", packageName);
                     }
 
+                    // Step 2 - find which match is the highest version (there should be only one match as this is
+                    //          default NuGet behavior, but we may change the code to list all versions at a later date.
                     MatchingPackage highest = foundPackages[0];
-
                     foreach (MatchingPackage match in foundPackages)
                     {
                         if ( match.PackageVersion > highest.PackageVersion )
@@ -192,6 +196,7 @@ namespace update_package_reference
                         Console.WriteLine("Selected package: {0} {1}   ({2})", highest.PackageName, highest.PackageVersionStr, highest.PackageVersion.ToString());
                     }
 
+                    // Step 3 - find a list of all matching project files
                     string rootFolder = Path.GetDirectoryName(projectFilespec);
                     string filespec = Path.GetFileName(projectFilespec);
 
@@ -219,6 +224,8 @@ namespace update_package_reference
                         string pattern = String.Format("<PackageReference Include=\"{0}\">\\s+(<Version>)(?<verRef>[\\[(]?[\\d.,*]+[\\])]?)(<\\/Version>)\\s+<\\/PackageReference>", packageName.Replace(".", "\\."));
                         Regex projPattern = new Regex(pattern);
 
+
+                        // Step 4 - Scan each project file for a match to the regular expression above.  If found use the match information to neatly overwrite the current package version.
                         foreach (string projFile in projectFiles)
                         {
                             string stuff = File.ReadAllText(projFile);
@@ -250,7 +257,6 @@ namespace update_package_reference
                             else
                             {
                                 Console.WriteLine("No matching reference found in {0}.  File not changed.", projFile);
-                                retVal = 5;
                             }
                         }
                     }

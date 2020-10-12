@@ -51,6 +51,10 @@ This utility will only work on project that use PackageReference for NuGet resou
 
 **update_package_reference** leverages the NuGet CLI.  The NuGet CLI must be installed on the machine running **update_package_reference**, and the NuGet CLI's installation folder must appear in the environment's search path variable.
 
+When sources are added to NuGet and credentials bound to the NuGet CLI, the username applied at that time need to be/need to have been a fully qualified username - **user@extron.com** ratehr than simply **user**.  If improper usernames were used users might encounter Username + Password prompts when running **update_package_reference**
+
+Extron Artifactory users should be set up to work with Virtual Repositories as a standard practice.  Neither the NuGet CLI nor **update_package_reference** recognize Virtual Repository aliases.  To use **update_package_reference** a NuGet source that points to the "local" (concrete) repository must be added (this being in addition to, not a substitute for virtual repository sources)
+
 ## Using update_package_reference ##
 
 ---
@@ -72,6 +76,17 @@ The Package Manager Console **Update-Package** command accepts the ID (name) of 
 update_package_reference -c c:\projects\control\gcpro\*.csproj -p extron.pro.communication.control -tag global_messaging -d -verbose
 ```
 
+### Return Codes ###
+
+| Code | Description |
+|---|---|
+| 0 | Success/no errors.  (projects that don't contain a matching ProjectReference are not considered to be an error) |
+| 1 | Command line parse error |
+| 2 | No matching packages found in the Repo (bad search tag?) |
+| 3 | No matching project files found |
+| 4 | Failed to update one or more project files (file locked, read-only or ???) |
+
+
 ## Search Tags ##
 
 ---
@@ -90,7 +105,7 @@ Search Tags are not case sensitive.  If a package contains the tag **Nortxe**, p
 
 For NuGet tag searches, one should avoid camel or pascal case search tags.  It appears the tag will first be applied to the search as provided, then broken up into capitalized tokens applied to individual searches.
 
-For example, when searching for a package containing the tag **NORTXEAbZy**, a search tag of **NORTXEAbZy** will yield the following (search results are visible in verbose mode):
+For example, when searching for a package containing the tag **NORTXEAbZy**, a search tag of **NORTXEAbZy** will yield the following internal results:
 
 ```bash
 Blog.Corezy.Webapi.Template 1.0.0
