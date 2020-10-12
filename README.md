@@ -1,6 +1,21 @@
 # update_package_reference #
 
+[Problem statement](#The-(long-winded)-Problem-Statement)
+
+[Who is this for](#Who-is-this-for)
+
+[Requirements](#Requirements)
+
+[Using update_package_reference](#Using-update_package_reference)
+
+[Search Tags](#Search-Tags)
+
+---
+---
+
 ## The (long winded) Problem Statement ##
+
+---
 
 Control SW Applications currently consume several libraries as source code mapped into the solution structure.  When the libraries are modified, CI picks up on the change and rebuilds the consuming application with the latest version of the source code.  The library version numbers don't matter.
 
@@ -17,3 +32,110 @@ The best option then is for CI to modify the affected projects.  There are two o
 - When a library is modified, CI will update the project files of the affected applications.  This is a bad idea - for any given project it would require CI to maintain a list of latest-tracking applications.
 
 - When an affected application is built, it will have it's package references updated in a pre-build step.  **This is where update_package_reference comes in.**
+
+## Who is this for ##
+
+---
+
+This utility was created for CI as a tool to allow applications to track the latest versions of the library packages they depend on.  The CI process, having an understanding of which package references must be kept up to date, will use this tool for those packages.
+
+For packages that aren't to be automatically updated, it's up to developers to make package changes, and for that task the package manager in Visual Studio is a better tool.
+
+**update_package_reference** is intended for updating references to Extron libraries hosted on Artifactory.  It could be used, by CI or developers, to update the references to any NuGet package, Extron or 3rd party, but one would have to be mindful of a 3rd party package's dependency tree.
+
+This utility will only work on project that use PackageReference for NuGet resources.  It will not work for Packages.Congig - for that the NuGet CLI should be used.
+
+## Requirements ##
+
+---
+
+**update_package_reference** leverages the NuGet CLI.  The NuGet CLI must be installed on the machine running **update_package_reference**, and the NuGet CLI's installation folder must appear in the environment's search path variable.
+
+## Using update_package_reference ##
+
+---
+
+The Package Manager Console **Update-Package** command accepts the ID (name) of a package and modify's any the current solution's projects that reference that package to make use of the latest version.  **update_package_reference** works in much the same way, but it doesn't have the benefit of loaded solution and project files so it accepts parameters that help it along.
+
+|shorthand|name|description|
+|---|---|---|
+| c | csproj | The project file(s) that will have their references to the specified package updated.  Wildcards are supported.  Only project files with **PackageReference**s that include the named package will be modified. |
+| p | package | The ID or name of a package to be upgraded.   |
+| t | tag | A search word to help narrow/speed up the package search.  Can match the package, description or something ftom the package's list of tags. See: [Search Tags](#Search-Tags)|
+| s | source | (optional) The URI of a NuGet repository such as [https://extron.jfrog.io/artifactory/nuget-dev/](https://extron.jfrog.io/artifactory/nuget-dev/) |
+| d | dryrun | (optional) If this parameter is supplied project files are not modified.  **update_package_reference** will instead report what changes would have been made. |
+| v | verbose | (optional) This parameter puts **update_package_reference** into verbose mode. |
+
+**Example**: - do a practice run of updating all projects in GCPro to use the latest version of the extron.pro.communication.control package:
+
+```bash
+update_package_reference -c c:\projects\control\gcpro\*.csproj -p extron.pro.communication.control -tag global_messaging -d -verbose
+```
+
+## Search Tags ##
+
+---
+
+update_package_reference leverages the NuGet CLI to obtain a list of packages.  If told to list everything, NuGet will spend a long time streaming out a list of packages.  The search can be narrowed by searching for a specific tag.  A tag is a string/keyword appearing in a package name, a packages list of tags (specified in the package nuspec file), or package description (also in the nuspec file).
+
+> using a package name for the tag does not work - the name is not recognized and nuget will go into a lengthy package listing process as if told to list everything.
+
+### Important notes about tags: ###
+
+#### Search Tags are not case sensitive. ####
+
+Search Tags are not case sensitive.  If a package contains the tag **Nortxe**, providing a search tag value of **nortxe** should locate it.
+
+#### Avoid camel or pascal case search tags ####
+
+For NuGet tag searches, one should avoid camel or pascal case search tags.  It appears the tag will first be applied to the search as provided, then broken up into capitalized tokens applied to individual searches.
+
+For example, when searching for a package containing the tag **NORTXEAbZy**, a search tag of **NORTXEAbZy** will yield the following (search results are visible in verbose mode):
+
+```bash
+Blog.Corezy.Webapi.Template 1.0.0
+HiNetCloud.System.Web.WebPages.Razor 20.6.29.11
+MonoGame.Framework.Bridge 3.7.0.2
+MonoGame.Template.Gtk.CSharp 3.8.0.5
+Muffin.Encryption.Service 3.33.333.9020
+NumberProgressBar 1.1.2
+ZY.BaseHelper 1.0.1.2
+ZY.Common 1.0.22
+ZY.EncryptKey 1.0.0
+ZY.Extend 1.0.0.3
+ZY.Extend.Core 1.0.0
+ZY.FrameWork 1.0.0
+ZY.Framework.Core 1.0.3.1
+ZY.HTTP 1.0.0.7
+ZY.IOC 1.0.0
+ZY.IOC.Mvc 1.0.0
+ZY.Logger 1.0.5
+ZY.Office 1.0.0.2
+ZY.ORM 1.0.2.9
+ZY.ORM.Extend 1.0.0.2
+ZY.PollyExtend 1.0.0.1
+ZY.Template.Core 1.0.0.4
+ZY.WeChat.PublicPlatform 1.0.0
+ZyBlog.Core.Webapi.Template 1.1.0
+zyCal 1.8.0
+zyCATApi.Template.Core 1.2.0
+zyWebApiTemplate.Core 1.0.0
+```
+
+...where a search tag of **nortxeabzy** yields only the sought-after package:
+
+```bash
+Muffin.Encryption.Service 3.33.333.9020
+```
+
+#### Avoid tags with underscores, dashes or periods/dots ####
+
+If a package contains a tag with underscores, dashes or the like, it's impossible to craft a search tag that won't match more packages than desired (see above).
+
+#### Description tags are best for CI ####
+
+When a NuGet package is published to Artifactory, a search tag can be used to immediately that package if there is a matching string in the package description.
+
+Search tags are also applied to a package's tag collection, but package tags appear to be indexed by the repo server, and this indexing process doesn't happen immediately.  Where CI builds and publishes a library package and then builds dependant applications expecting that they will be updated to the latest version (using this utility), those builds will likely include an older version of the package unless the search tag appears in the package description.
+
+[end]
