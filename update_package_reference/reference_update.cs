@@ -49,9 +49,9 @@ namespace update_package_reference
             [Option('d', "dryrun", Required = false, Default = false, HelpText = "Prevents the utility from making any proejct file changes.  Everything up to that point procedes normally.")]
             public bool DryRun { get; set; }
 
-            [Option('e', "exclude", Required = false, HelpText = "Names a folder to be excluded in the csproj search.  Absolute Paths only.  May be specified multiple times.")]
-            //public string[] Exclude { get; set; }
-            public IEnumerable<string> Exclude { get; set; }
+            //[Option('e', "exclude", Separator = ',',  Required = false, HelpText = "Names a folder to be excluded in the csproj search.  Absolute Paths only.  May be specified multiple times.")]
+            ////public string[] Exclude { get; set; }
+            //public IEnumerable<string> Exclude { get; set; }
 
         }
 
@@ -158,7 +158,7 @@ namespace update_package_reference
             string packageNameLC = "";
             string projectFilespec = "";
             string sourceRepo = "";
-            IEnumerable<string> noScan = new List<string>();
+            //IEnumerable<string> noScan = new List<string>();
 
             parseErr = false;
 
@@ -172,7 +172,7 @@ namespace update_package_reference
                        packageName = o.PackageID;
                        projectFilespec = o.ProjectFilespec;
                        sourceRepo = o.Source;
-                       noScan = o.Exclude;
+//                       noScan = o.Exclude;
                        if ( String.IsNullOrEmpty(searchTag) )
                        {
                            searchTag = packageName;
