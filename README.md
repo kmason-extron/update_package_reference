@@ -1,5 +1,7 @@
 # update_package_reference #
 
+[Revision History](#Revision-History)
+
 [Problem statement](#The-(long-winded)-Problem-Statement)
 
 [Who is this for](#Who-is-this-for)
@@ -11,6 +13,13 @@
 [Search Tags](#Search-Tags)
 
 ---
+
+## Revision History ##
+
+|Version|Notes|
+|---|---|
+| v1.1.0.0 | Now supports .NET Standard projects.  Tags are now optional - if no tag is provided the package ID is used for the tag.  The utility was doing case sensitive searches against packages returned by Nuget/Artifactory, resulting in a No Packages Found error if casing wasn't exact.  This has been fixed.  |
+| v1.0.0.0 | Initial Release. |
 
 ---
 
@@ -86,6 +95,7 @@ update_package_reference -c c:\projects\control\gcpro\*.csproj -p extron.pro.com
 | 2 | No matching packages found in the Repo (bad search tag?) |
 | 3 | No matching project files found |
 | 4 | Failed to update one or more project files (file locked, read-only or ???) |
+| 5 | Error while scanning specified folder for project files |
 
 
 ## Search Tags ##
