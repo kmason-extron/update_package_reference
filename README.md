@@ -1,5 +1,7 @@
 # update_package_reference #
 
+[Revision History](#Revision-History)
+
 [Problem statement](#The-(long-winded)-Problem-Statement)
 
 [Who is this for](#Who-is-this-for)
@@ -11,6 +13,15 @@
 [Search Tags](#Search-Tags)
 
 ---
+
+---
+
+## Revision History ##
+
+|Version|Notes|
+|---|---|
+| v1.1.0.0 | Now supports .NET Standard projects.  Tags are now optional - if no tag is provided the package ID is used for the tag.  The utility was doing case sensitive searches against packages returned by Nuget/Artifactory, resulting in a No Packages Found error if casing wasn't exact.  This has been fixed.  |
+| v1.0.0.0 | Initial Release. |
 
 ---
 
@@ -74,7 +85,7 @@ The Package Manager Console **Update-Package** command accepts the ID (name) of 
 **Example**: - do a practice run of updating all projects in GCPro to use the latest version of the extron.pro.communication.control package:
 
 ```bash
-update_package_reference -c c:\projects\control\gcpro\*.csproj -p extron.pro.communication.control -tag global_messaging -d -verbose
+update_package_reference -c c:\projects\control\gcpro\*.csproj -p extron.pro.communication.control -t global_messaging -d -verbose
 ```
 
 ### Return Codes ###
@@ -86,6 +97,7 @@ update_package_reference -c c:\projects\control\gcpro\*.csproj -p extron.pro.com
 | 2 | No matching packages found in the Repo (bad search tag?) |
 | 3 | No matching project files found |
 | 4 | Failed to update one or more project files (file locked, read-only or ???) |
+| 5 | Error while scanning specified folder for project files |
 
 
 ## Search Tags ##
@@ -94,11 +106,11 @@ update_package_reference -c c:\projects\control\gcpro\*.csproj -p extron.pro.com
 
 update_package_reference leverages the NuGet CLI to obtain a list of packages.  If told to list everything, NuGet will spend a long time streaming out a list of packages.  The search can be narrowed by searching for a specific tag.  A tag is a string/keyword appearing in a package name, a packages list of tags (specified in the package nuspec file), or package description (also in the nuspec file).
 
-> using a package name for the tag does not work - the name is not recognized and nuget will go into a lengthy package listing process as if told to list everything.
+> using a package name for the tag can produce unfavorable results - often times the name is not recognized and nuget will go into a painfully lengthy package listing process as if told to list everything.
 
-### Important notes about tags: ###
+### Important notes about tags ###
 
-#### Search Tags are not case sensitive. ####
+#### Search Tags are not case sensitive ####
 
 Search Tags are not case sensitive.  If a package contains the tag **Nortxe**, providing a search tag value of **nortxe** should locate it.
 
