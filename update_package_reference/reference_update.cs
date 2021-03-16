@@ -23,13 +23,21 @@ namespace update_package_reference
         [ObfuscationAttribute(Exclude = true, ApplyToMembers = true)]
         internal class FWUpdateCLIOptions
         {
+            //private readonly IEnumerable<string> _excludes;
+
+            public FWUpdateCLIOptions()//IEnumerable<string> excludes)
+            {
+                //_excludes = excludes;
+                //_excludes = new List<string>();
+            }
+
             [Option('v', "verbose", Required = false, Default = false, HelpText = "Set output to verbose messages (if omitted verbose mode is off).")]
             public bool Verbose { get; set; }
 
             [Option('p', "package", Required = true, HelpText = "The name of the package that will get an updated reference in the target project files.  tag is used to pare down a repo listing to a collection that includes this value.")]
             public string PackageID { get; set; }
 
-            [Option('t', "tag", Required = true, HelpText = "A string that will be used to help find the package to be upgraded.  A tag can be a name or a value contained within a package tags collection. tag is used to narrow down the repo listing to as few entries as possible in addition to the desired package name.")]
+            [Option('t', "tag", Required = false, HelpText = "A string that will be used to help find the package to be upgraded.  A tag can be a name or a value contained within a package tags collection. tag is used to narrow down the repo listing to as few entries as possible in addition to the desired package name.  If a tag is not provided, the package name will be used as the tag.")]
             public string Tag { get; set; }
 
             [Option('s', "source", Required = false, Default = "", HelpText = "A URI of a source to browse for the desired package.")]
@@ -40,6 +48,11 @@ namespace update_package_reference
 
             [Option('d', "dryrun", Required = false, Default = false, HelpText = "Prevents the utility from making any proejct file changes.  Everything up to that point procedes normally.")]
             public bool DryRun { get; set; }
+
+            //[Option('e', "exclude", Separator = ',',  Required = false, HelpText = "Names a folder to be excluded in the csproj search.  Absolute Paths only.  May be specified multiple times.")]
+            ////public string[] Exclude { get; set; }
+            //public IEnumerable<string> Exclude { get; set; }
+
         }
 
         // Called when there is a problem parsing CLI parameters
@@ -87,6 +100,53 @@ namespace update_package_reference
 
         }
 
+        string[] _GetFiles(string folder, string filespec, string[] excludes)
+        {
+            string[] shallowFiles = Directory.GetFiles(folder, filespec, SearchOption.TopDirectoryOnly);
+            string[] shallowFolders = Directory.GetDirectories(folder);
+            string[] foldersToScan = shallowFolders.Where(x => !excludes.Contains(x.ToLower())).ToArray();
+            foreach ( string scanFolder in foldersToScan )
+            {
+                string[] deepFiles = _GetFiles(scanFolder, filespec, excludes);
+
+                string[] accum = new string[deepFiles.Length + shallowFiles.Length];
+                shallowFiles.CopyTo(accum, 0);
+                deepFiles.CopyTo(accum, shallowFiles.Length);
+                shallowFiles = accum;
+            }
+            return shallowFiles;
+        }
+
+        string[] GetFiles(string folder, string filespec, string[] excludes)
+        {
+            string resolved = System.IO.Path.GetFullPath(folder);
+            string[] lcExcludes = excludes.Select(x => x.ToLower() ).ToArray();
+            return _GetFiles(resolved, filespec, lcExcludes);
+        }
+
+        string[] GetFiles(string filespec, string[] excludes)
+        {
+            string folder = System.IO.Path.GetDirectoryName(filespec);
+
+            string spec = filespec.Substring(folder.Length);
+
+            while ( (spec.Length > 0) && ((spec[0] == '\\') || (spec[0] == '/')))
+            {
+                spec = spec.Substring(1);
+            }
+
+            if ( spec.Length > 0 )
+            {
+                return GetFiles(folder, spec, excludes);
+            }
+            else
+            {
+                return new string[0];
+            }
+        }
+
+
+
         internal int Run(string[] args)
         {
             int retVal = 0;
@@ -98,6 +158,7 @@ namespace update_package_reference
             string packageNameLC = "";
             string projectFilespec = "";
             string sourceRepo = "";
+            //IEnumerable<string> noScan = new List<string>();
 
             parseErr = false;
 
@@ -111,6 +172,12 @@ namespace update_package_reference
                        packageName = o.PackageID;
                        projectFilespec = o.ProjectFilespec;
                        sourceRepo = o.Source;
+//                       noScan = o.Exclude;
+                       if ( String.IsNullOrEmpty(searchTag) )
+                       {
+                           searchTag = packageName;
+                       }
+
 
                    }).WithNotParsed(HandleParseError);
 
@@ -205,7 +272,35 @@ namespace update_package_reference
                         Console.WriteLine("Searching for {0} in {1}", filespec, rootFolder);
                     }
 
-                    string[] projectFiles = Directory.GetFiles(rootFolder, filespec, SearchOption.AllDirectories);
+                    string[] projectFiles = null; 
+
+                    try
+                    {
+                        projectFiles = Directory.GetFiles(rootFolder, filespec, SearchOption.AllDirectories);
+
+
+
+                    }
+                    catch
+                    {
+                        // Second attempt
+                        Console.WriteLine("Adjusted search for project files from CWD: {0}", System.IO.Directory.GetCurrentDirectory());
+
+                        if (rootFolder[rootFolder.Length - 1] != '\\')
+                            rootFolder += '\\';
+                        filespec = projectFilespec.Substring(rootFolder.Length);
+
+                        try
+                        {
+                            projectFiles = Directory.GetFiles(rootFolder, filespec, SearchOption.AllDirectories);
+                        }
+                        catch
+                        {
+                            retVal = 5; // Error scanning for project files.  Bad filespec?
+                            goto get_outta_dodge;
+
+                        }
+                    }
 
                     if (projectFiles.Count() == 0 )
                     {
@@ -221,15 +316,29 @@ namespace update_package_reference
                             }
                         }
 
-                        string pattern = String.Format("<PackageReference Include=\"{0}\">\\s+(<Version>)(?<verRef>[\\[(]?[\\d.,*]+[\\])]?)(<\\/Version>)\\s+<\\/PackageReference>", packageName.Replace(".", "\\."));
-                        Regex projPattern = new Regex(pattern);
+                        // This regex will find package references in .NET Standard projects
+                        // <PackageReference\s+Include="Newtonsoft.Json"\s+Version=\"(?<verRef>[\[(]?[\d.,*]+[\])]?)\"\s+\/>
+                        //
+                        // This regex will find package references in .NET Framework projects
+                        // <PackageReference Include=\"Newtonsoft.Json\">\s+(<Version>)(?<verRef>[\[(]?[\d.,*]+[\])]?)(<\/Version>)\s+<\/PackageReference>
 
+                        string frameworkPattern = String.Format("<PackageReference Include=\"{0}\">\\s+(<Version>)(?<verRef>[\\[(]?[\\d.,*]+[\\])]?)(<\\/Version>)\\s+<\\/PackageReference>", packageName.Replace(".", "\\."));
+                        Regex frameworkRegex = new Regex(frameworkPattern);
+
+                        string standardPattern = String.Format("<PackageReference\\s+Include=\"{0}\"\\s+Version=\"(?<verRef>[\\[(]?[\\d.,*]+[\\])]?)\"\\s+\\/>", packageName.Replace(".", "\\."));
+                        Regex standardRegex = new Regex(standardPattern);
 
                         // Step 4 - Scan each project file for a match to the regular expression above.  If found use the match information to neatly overwrite the current package version.
                         foreach (string projFile in projectFiles)
                         {
+                            string projType = "fx";
                             string stuff = File.ReadAllText(projFile);
-                            Match pkgRef = projPattern.Match(stuff);
+                            Match pkgRef = frameworkRegex.Match(stuff);
+                            if (!pkgRef.Success)
+                            {
+                                pkgRef = standardRegex.Match(stuff);
+                                projType = "standard";
+                            }
                             if ( pkgRef.Success )
                             {
                                 string newProjectFile = stuff.Substring(0, pkgRef.Groups["verRef"].Index);
@@ -238,31 +347,39 @@ namespace update_package_reference
 
                                 if (dryrun)
                                 {
-                                    Console.WriteLine("Dry Run: Would have updated {0} PackageReference of {1} from {2} to {3}.  File not changed.", projFile, packageName, pkgRef.Groups["verRef"].Value, highest.PackageVersionStr);
+                                    Console.WriteLine("Dry Run: Would have updated {0} ({1}) PackageReference of {2} from {3} to {4}.  File not changed.", projFile, projType, packageName, pkgRef.Groups["verRef"].Value, highest.PackageVersionStr);
                                 }
                                 else
                                 {
-                                    Console.WriteLine("Updating {0} PackageReference of {1} from {2} to {3}.", projFile, packageName, pkgRef.Groups["verRef"].Value, highest.PackageVersionStr);
+                                    Console.WriteLine("Updating {0} ({1}) PackageReference of {2} from {3} to {4}.", projFile, projType, packageName, pkgRef.Groups["verRef"].Value, highest.PackageVersionStr);
                                     try
                                     {
                                         File.WriteAllText(projFile, newProjectFile);
                                     }
                                     catch
                                     {
-                                        Console.WriteLine("    Failed to update {0}.  File locked or read-only?", projFile);
+                                        Console.WriteLine("    Failed to update {0} ({1}).  File locked or read-only?", projFile, projType);
                                         retVal = 4;
                                     }
                                 }
+                                continue;
                             }
                             else
                             {
-                                Console.WriteLine("No matching reference found in {0}.  File not changed.", projFile);
+                                Console.WriteLine("No matching reference found in {0} ({1}).  File not changed.", projFile, projType);
                             }
                         }
                     }
                 }
             }
 
+            get_outta_dodge:
+
+
+#if DEBUG
+            Console.WriteLine("\nPress a key...");
+            Console.ReadKey();
+#endif
             return retVal;
         }
 
