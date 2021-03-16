@@ -147,7 +147,7 @@ namespace update_package_reference
                 List<MatchingPackage> foundPackages = new List<MatchingPackage>();
 
                 string packageRegex = String.Format("(?<pkgStr>{0})\\s+(?<verStr>\\d+(\\.\\d+)+)", packageName.Replace(".", "\\."));
-                Regex reggie = new Regex(packageRegex);
+                Regex reggie = new Regex(packageRegex, RegexOptions.IgnoreCase);
                 MatchCollection found = reggie.Matches(packageList);
                 foreach ( Match entry in found )
                 {
@@ -173,7 +173,7 @@ namespace update_package_reference
                 {
                     if (verbose)
                     {
-                        Console.WriteLine("Found {0} matching packages", packageName);
+                        Console.WriteLine("Found {0} matching packages", foundPackages.Count);
                     }
 
                     // Step 2 - find which match is the highest version (there should be only one match as this is
