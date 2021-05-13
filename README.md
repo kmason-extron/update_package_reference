@@ -20,6 +20,7 @@
 
 |Version|Notes|
 |---|---|
+| v1.2.0.0 | A new **e** or **explicit** parameter can be used to specify an exact version number or version range.  Also added **exact** option for discovered package versions. |
 | v1.1.0.0 | Now supports .NET Standard projects.  Tags are now optional - if no tag is provided the package ID is used for the tag.  The utility was doing case sensitive searches against packages returned by Nuget/Artifactory, resulting in a No Packages Found error if casing wasn't exact.  This has been fixed.  |
 | v1.0.0.0 | Initial Release. |
 
@@ -81,12 +82,34 @@ The Package Manager Console **Update-Package** command accepts the ID (name) of 
 | s | source | (optional) The URI of a NuGet repository such as [https://extron.jfrog.io/artifactory/nuget-dev/](https://extron.jfrog.io/artifactory/nuget-dev/) |
 | d | dryrun | (optional) If this parameter is supplied project files are not modified.  **update_package_reference** will instead report what changes would have been made. |
 | v | verbose | (optional) This parameter puts **update_package_reference** into verbose mode. |
+| x | exact | (optional) If exact is specified, projects are updated to accept only the exact highest version found in the online search - no higher or lower versions will be accepted (i.e. "[x.y.z]" instead of "x.y.z" ) |
+| e | explicit | (optional) Allows explicit version number references or version ranges to be provided.  If an explicit version is provided, **tag**, **source** and **exact** are ignored, and no online package search is attempted. |
 
-**Example**: - do a practice run of updating all projects in GCPro to use the latest version of the extron.pro.communication.control package:
+**Example 1**: - do a practice run of updating all projects in GCPro to use the latest version of the extron.pro.communication.control package:
 
 ```bash
 update_package_reference -c c:\projects\control\gcpro\*.csproj -p extron.pro.communication.control -t global_messaging -d -verbose
 ```
+
+**Example 2**: - do a practice run of updating all projects in GCPro to use _only_ the latest version of the extron.pro.communication.control package:
+
+```bash
+update_package_reference -c c:\projects\control\gcpro\*.csproj -p extron.pro.communication.control -t global_messaging -d -verbose -x
+```
+
+**Example 3**: - do a practice run of updating all projects in GCPro to use _only_ an explictly provided version.  No online package search is made - typos and bad version references are on you :)
+
+```bash
+update_package_reference -c c:\projects\control\gcpro\*.csproj -p extron.pro.communication.control -d -verbose -e [1.2.3]
+```
+
+**Example 4**: - same as Example 3, where a version range is provided.  In this case, everything from version 3.0 up to and **excluding** version 4.0.
+
+```bash
+update_package_reference -c c:\projects\control\gcpro\*.csproj -p extron.pro.communication.control -d -verbose -e [3.0,4.0)
+```
+
+As long as you include the -d option these are safe to try.  Changes are made only if this option is omitted.
 
 ### Return Codes ###
 
@@ -98,7 +121,6 @@ update_package_reference -c c:\projects\control\gcpro\*.csproj -p extron.pro.com
 | 3 | No matching project files found |
 | 4 | Failed to update one or more project files (file locked, read-only or ???) |
 | 5 | Error while scanning specified folder for project files |
-
 
 ## Search Tags ##
 

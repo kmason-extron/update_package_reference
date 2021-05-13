@@ -49,6 +49,14 @@ namespace update_package_reference
             [Option('d', "dryrun", Required = false, Default = false, HelpText = "Prevents the utility from making any proejct file changes.  Everything up to that point procedes normally.")]
             public bool DryRun { get; set; }
 
+            [Option('x', "exact", Required = false, HelpText = "The version of the package that is to be referenced.  This allows for explicit version ranges to be specified.  If an exact version is provided no online package seatch is performed - tag and source options are ignored if provided.")]
+            public bool exact { get; set; }
+
+            [Option('e', "explicit", Required = false, HelpText = "The version of the package that is to be referenced.  This allows for explicit version ranges to be specified.  If an exact version is provided no online package seatch is performed - tag and source options are ignored if provided.")]
+            public string Version { get; set; }
+
+
+
             //[Option('e', "exclude", Separator = ',',  Required = false, HelpText = "Names a folder to be excluded in the csproj search.  Absolute Paths only.  May be specified multiple times.")]
             ////public string[] Exclude { get; set; }
             //public IEnumerable<string> Exclude { get; set; }
@@ -146,6 +154,135 @@ namespace update_package_reference
         }
 
 
+        internal Tuple<int,string[]> GetProjectFiles(string projectFilespec, bool verbose)
+        {
+            // Step 3 - find a list of all matching project files
+            string rootFolder = Path.GetDirectoryName(projectFilespec);
+            string filespec = Path.GetFileName(projectFilespec);
+
+            int retval = 0;
+
+            if (verbose)
+            {
+                Console.WriteLine("Searching for {0} in {1}", filespec, rootFolder);
+            }
+
+            string[] projectFiles = null;
+
+            try
+            {
+                projectFiles = Directory.GetFiles(rootFolder, filespec, SearchOption.AllDirectories);
+            }
+            catch
+            {
+                // Second attempt
+                Console.WriteLine("Adjusted search for project files from CWD: {0}", System.IO.Directory.GetCurrentDirectory());
+
+                if (rootFolder[rootFolder.Length - 1] != '\\')
+                    rootFolder += '\\';
+                filespec = projectFilespec.Substring(rootFolder.Length);
+
+                try
+                {
+                    projectFiles = Directory.GetFiles(rootFolder, filespec, SearchOption.AllDirectories);
+                }
+                catch
+                {
+                    retval = 5; // Error scanning for project files.  Bad filespec?
+                }
+            }
+
+            if (projectFiles.Count() == 0)
+            {
+                retval = 3; // no project files to modify
+            }
+
+            if (verbose)
+            {
+                foreach (string projFile in projectFiles)
+                {
+                    Console.WriteLine("    {0}", projFile);
+                }
+            }
+
+            return new Tuple<int, string[]>(retval, projectFiles);
+        }
+
+        internal int UpdateProjectFiles(string[] projectFiles, string packageVersionStr, string packageName, bool verbose, bool dryrun)
+        {
+            int retVal = 0;
+            // This regex will find package references in .NET Standard projects
+            // <PackageReference\s+Include="Newtonsoft.Json"\s+Version=\"(?<verRef>[\[(]?[\d.,*]+[\])]?)\"\s+\/>
+            //
+            // This regex will find package references in .NET Framework projects
+            // <PackageReference Include=\"Newtonsoft.Json\">\s+(<Version>)(?<verRef>[\[(]?[\d.,*]+[\])]?)(<\/Version>)\s+<\/PackageReference>
+
+            string frameworkPattern = String.Format("<PackageReference Include=\"{0}\">\\s+(<Version>)(?<verRef>[\\[(]?[\\d.,*]+[\\])]?)(<\\/Version>)\\s+<\\/PackageReference>", packageName.Replace(".", "\\."));
+            Regex frameworkRegex = new Regex(frameworkPattern);
+
+            string standardPattern = String.Format("<PackageReference\\s+Include=\"{0}\"\\s+Version=\"(?<verRef>[\\[(]?[\\d.,*]+[\\])]?)\"\\s+\\/>", packageName.Replace(".", "\\."));
+            Regex standardRegex = new Regex(standardPattern);
+
+            List<string> noMatchingReference = new List<string>();
+
+            foreach (string projFile in projectFiles)
+            {
+                try
+                {
+                    string projType = "fx";
+                    string stuff = File.ReadAllText(projFile);
+                    Match pkgRef = frameworkRegex.Match(stuff);
+                    if (!pkgRef.Success)
+                    {
+                        pkgRef = standardRegex.Match(stuff);
+                        projType = "standard";
+                    }
+                    if (pkgRef.Success)
+                    {
+                        string newProjectFile = stuff.Substring(0, pkgRef.Groups["verRef"].Index);
+                        newProjectFile += packageVersionStr; // Using the string instead of rendering the version object.
+                        newProjectFile += stuff.Substring(pkgRef.Groups["verRef"].Index + pkgRef.Groups["verRef"].Value.Length);
+
+                        if (dryrun)
+                        {
+                            Console.WriteLine("Dry Run: Would have updated {0} ({1}) PackageReference of {2} from {3} to {4}.  File not changed.", projFile, projType, packageName, pkgRef.Groups["verRef"].Value, packageVersionStr);
+                        }
+                        else
+                        {
+                            Console.WriteLine("Updating {0} ({1}) PackageReference of {2} from {3} to {4}.", projFile, projType, packageName, pkgRef.Groups["verRef"].Value, packageVersionStr);
+                            try
+                            {
+                                File.WriteAllText(projFile, newProjectFile);
+                            }
+                            catch
+                            {
+                                Console.WriteLine("Failed to update {0} ({1}).  File locked or read-only?", projFile, projType);
+                                retVal = 4;
+                            }
+                        }
+                        continue;
+                    }
+                    else
+                    {
+                        noMatchingReference.Add(string.Format("No matching reference found in {0} ({1}).  File not changed.", projFile, projType));
+                        //Console.WriteLine("No matching reference found in {0} ({1}).  File not changed.", projFile, projType);
+                    }
+                }
+                catch
+                {
+                    Console.WriteLine("Error while processing {0}", projFile);
+                    retVal = 4;
+                }
+            }
+
+            foreach ( string entry in noMatchingReference )
+            {
+                Console.WriteLine(entry);
+            }
+            return retVal;
+        }
+
+
 
         internal int Run(string[] args)
         {
@@ -153,11 +290,14 @@ namespace update_package_reference
 
             bool verbose = false;
             bool dryrun = false;
+            bool exact = false;
             string searchTag = "";
             string packageName = "";
             string packageNameLC = "";
             string projectFilespec = "";
             string sourceRepo = "";
+            string versionRange = "";
+            bool explicitVersionReference = false;
             //IEnumerable<string> noScan = new List<string>();
 
             parseErr = false;
@@ -172,6 +312,13 @@ namespace update_package_reference
                        packageName = o.PackageID;
                        projectFilespec = o.ProjectFilespec;
                        sourceRepo = o.Source;
+                       versionRange = o.Version;
+                       exact = o.exact;
+
+                       if (string.IsNullOrEmpty(versionRange) == false)
+                       {
+                           explicitVersionReference = true;
+                       }
 //                       noScan = o.Exclude;
                        if ( String.IsNullOrEmpty(searchTag) )
                        {
@@ -181,13 +328,25 @@ namespace update_package_reference
 
                    }).WithNotParsed(HandleParseError);
 
+#if DEBUG
+            Console.WriteLine("verbose:                  {0}",verbose);
+            Console.WriteLine("dryrun:                   {0}",dryrun);
+            Console.WriteLine("exact:                    {0}", exact);
+            Console.WriteLine("searchTag:                {0}",searchTag);
+            Console.WriteLine("packageName:              {0}",packageName);
+            Console.WriteLine("projectFilespec:          {0}",projectFilespec);
+            Console.WriteLine("sourceRepo:               {0}",sourceRepo);
+            Console.WriteLine("versionRange:             {0}",versionRange);
+            Console.WriteLine("explicitVersionReference: {0}",explicitVersionReference);
+#endif
+
             if (parseErr == true)
             {
                 retVal = 1; // param error
             }
             else
             {
-                if (verbose)
+                if (verbose && !explicitVersionReference)
                 {
                     Console.Write("Searching for package {0} with tag {1}", packageName, searchTag);
                     if ( String.IsNullOrEmpty(sourceRepo) == false)
@@ -197,54 +356,73 @@ namespace update_package_reference
                     Console.Write("\n");
                 }
 
-                // Step 1 - search the repo for the desired package using the provided search tag (and optional source URI).
-                //          This can take a notable amound of time - thus the stopwatch for verbose mode time reports.
-                Stopwatch stopWatch = new Stopwatch();
-                stopWatch.Start();
-                string packageList = GetRawPackageList(searchTag, sourceRepo);
-                stopWatch.Stop();
-
-                if (verbose)
-                {
-                    TimeSpan ts = stopWatch.Elapsed;
-                    Console.WriteLine("Package list acquired in {0:00} minutes {1:00}.{2:00} seconds", ts.Minutes, ts.Seconds, ts.Milliseconds / 10);
-                    Console.WriteLine(packageList);
-                }
-
                 List<MatchingPackage> foundPackages = new List<MatchingPackage>();
 
-                string packageRegex = String.Format("(?<pkgStr>{0})\\s+(?<verStr>\\d+(\\.\\d+)+)", packageName.Replace(".", "\\."));
-                Regex reggie = new Regex(packageRegex, RegexOptions.IgnoreCase);
-                MatchCollection found = reggie.Matches(packageList);
-                foreach ( Match entry in found )
+                if (explicitVersionReference == false)
                 {
-                    try
+                    // search the repo for the desired package using the provided search tag (and optional source URI).
+                    // This can take a notable amound of time - thus the stopwatch for verbose mode time reports.
+                    Stopwatch stopWatch = new Stopwatch();
+                    stopWatch.Start();
+                    string packageList = GetRawPackageList(searchTag, sourceRepo);
+                    stopWatch.Stop();
+
+                    if (verbose)
                     {
-                        foundPackages.Add(new MatchingPackage() { PackageName = entry.Groups["pkgStr"].Value, PackageVersionStr = entry.Groups["verStr"].Value });
+                        TimeSpan ts = stopWatch.Elapsed;
+                        Console.WriteLine("Package list acquired in {0:00} minutes {1:00}.{2:00} seconds", ts.Minutes, ts.Seconds, ts.Milliseconds / 10);
+                        Console.WriteLine(packageList);
                     }
-                    catch
+
+
+                    string packageRegex = String.Format("(?<pkgStr>{0})\\s+(?<verStr>\\d+(\\.\\d+)+)", packageName.Replace(".", "\\."));
+                    Regex reggie = new Regex(packageRegex, RegexOptions.IgnoreCase);
+                    MatchCollection found = reggie.Matches(packageList);
+                    foreach (Match entry in found)
                     {
-                        if (verbose)
+                        try
                         {
-                            Console.WriteLine("Could not parse {0} - discarding", packageName);
+                            foundPackages.Add(new MatchingPackage() { PackageName = entry.Groups["pkgStr"].Value, PackageVersionStr = entry.Groups["verStr"].Value });
+                        }
+                        catch
+                        {
+                            if (verbose)
+                            {
+                                Console.WriteLine("Could not parse {0} - discarding", packageName);
+                            }
                         }
                     }
                 }
 
-                if (foundPackages.Count == 0)
+                if ((foundPackages.Count == 0) && !explicitVersionReference  )
                 {
                     Console.WriteLine("No packages found matching {0}", packageName);
                     retVal = 2; // no matches found
                 }
                 else
                 {
+                    if (explicitVersionReference)
+                    {
+                        Tuple<int,string[]> exresults = GetProjectFiles(projectFilespec, verbose);
+
+                        retVal = exresults.Item1;
+                        if (exresults.Item1 != 0)
+                        {
+                            goto get_outta_dodge;
+                        }
+
+                        retVal = UpdateProjectFiles(exresults.Item2, versionRange, packageName, verbose, dryrun);
+
+                        goto get_outta_dodge;
+                    }
+
                     if (verbose)
                     {
                         Console.WriteLine("Found {0} matching packages", packageName);
                     }
 
-                    // Step 2 - find which match is the highest version (there should be only one match as this is
-                    //          default NuGet behavior, but we may change the code to list all versions at a later date.
+                    // find which match is the highest version (there should be only one match as this is
+                    // default NuGet behavior, but we may change the code to list all versions at a later date.
                     MatchingPackage highest = foundPackages[0];
                     foreach (MatchingPackage match in foundPackages)
                     {
@@ -258,118 +436,30 @@ namespace update_package_reference
                         }
                     }
 
+
                     if (verbose)
                     {
                         Console.WriteLine("Selected package: {0} {1}   ({2})", highest.PackageName, highest.PackageVersionStr, highest.PackageVersion.ToString());
                     }
 
-                    // Step 3 - find a list of all matching project files
-                    string rootFolder = Path.GetDirectoryName(projectFilespec);
-                    string filespec = Path.GetFileName(projectFilespec);
-
-                    if (verbose)
+                    string versionStr = highest.PackageVersionStr;
+                    if (exact == true)
                     {
-                        Console.WriteLine("Searching for {0} in {1}", filespec, rootFolder);
+                        versionStr = string.Format("[{0}]", highest.PackageVersionStr);
                     }
 
-                    string[] projectFiles = null; 
+                    // find a list of all matching project files
+                    Tuple<int, string[]> results = GetProjectFiles(projectFilespec, verbose);
 
-                    try
+                    retVal = results.Item1;
+
+                    if (retVal != 0)
                     {
-                        projectFiles = Directory.GetFiles(rootFolder, filespec, SearchOption.AllDirectories);
-
-
-
-                    }
-                    catch
-                    {
-                        // Second attempt
-                        Console.WriteLine("Adjusted search for project files from CWD: {0}", System.IO.Directory.GetCurrentDirectory());
-
-                        if (rootFolder[rootFolder.Length - 1] != '\\')
-                            rootFolder += '\\';
-                        filespec = projectFilespec.Substring(rootFolder.Length);
-
-                        try
-                        {
-                            projectFiles = Directory.GetFiles(rootFolder, filespec, SearchOption.AllDirectories);
-                        }
-                        catch
-                        {
-                            retVal = 5; // Error scanning for project files.  Bad filespec?
-                            goto get_outta_dodge;
-
-                        }
+                        goto get_outta_dodge;
                     }
 
-                    if (projectFiles.Count() == 0 )
-                    {
-                        retVal = 3; // no project files to modify
-                    }
-                    else
-                    {
-                        if (verbose)
-                        {
-                            foreach (string projFile in projectFiles)
-                            {
-                                Console.WriteLine("    {0}", projFile);
-                            }
-                        }
-
-                        // This regex will find package references in .NET Standard projects
-                        // <PackageReference\s+Include="Newtonsoft.Json"\s+Version=\"(?<verRef>[\[(]?[\d.,*]+[\])]?)\"\s+\/>
-                        //
-                        // This regex will find package references in .NET Framework projects
-                        // <PackageReference Include=\"Newtonsoft.Json\">\s+(<Version>)(?<verRef>[\[(]?[\d.,*]+[\])]?)(<\/Version>)\s+<\/PackageReference>
-
-                        string frameworkPattern = String.Format("<PackageReference Include=\"{0}\">\\s+(<Version>)(?<verRef>[\\[(]?[\\d.,*]+[\\])]?)(<\\/Version>)\\s+<\\/PackageReference>", packageName.Replace(".", "\\."));
-                        Regex frameworkRegex = new Regex(frameworkPattern);
-
-                        string standardPattern = String.Format("<PackageReference\\s+Include=\"{0}\"\\s+Version=\"(?<verRef>[\\[(]?[\\d.,*]+[\\])]?)\"\\s+\\/>", packageName.Replace(".", "\\."));
-                        Regex standardRegex = new Regex(standardPattern);
-
-                        // Step 4 - Scan each project file for a match to the regular expression above.  If found use the match information to neatly overwrite the current package version.
-                        foreach (string projFile in projectFiles)
-                        {
-                            string projType = "fx";
-                            string stuff = File.ReadAllText(projFile);
-                            Match pkgRef = frameworkRegex.Match(stuff);
-                            if (!pkgRef.Success)
-                            {
-                                pkgRef = standardRegex.Match(stuff);
-                                projType = "standard";
-                            }
-                            if ( pkgRef.Success )
-                            {
-                                string newProjectFile = stuff.Substring(0, pkgRef.Groups["verRef"].Index);
-                                newProjectFile += highest.PackageVersionStr; // Using the string instead of rendering the version object.
-                                newProjectFile += stuff.Substring(pkgRef.Groups["verRef"].Index + pkgRef.Groups["verRef"].Value.Length);
-
-                                if (dryrun)
-                                {
-                                    Console.WriteLine("Dry Run: Would have updated {0} ({1}) PackageReference of {2} from {3} to {4}.  File not changed.", projFile, projType, packageName, pkgRef.Groups["verRef"].Value, highest.PackageVersionStr);
-                                }
-                                else
-                                {
-                                    Console.WriteLine("Updating {0} ({1}) PackageReference of {2} from {3} to {4}.", projFile, projType, packageName, pkgRef.Groups["verRef"].Value, highest.PackageVersionStr);
-                                    try
-                                    {
-                                        File.WriteAllText(projFile, newProjectFile);
-                                    }
-                                    catch
-                                    {
-                                        Console.WriteLine("    Failed to update {0} ({1}).  File locked or read-only?", projFile, projType);
-                                        retVal = 4;
-                                    }
-                                }
-                                continue;
-                            }
-                            else
-                            {
-                                Console.WriteLine("No matching reference found in {0} ({1}).  File not changed.", projFile, projType);
-                            }
-                        }
-                    }
+                    retVal = UpdateProjectFiles(results.Item2, versionStr, packageName, verbose, dryrun);
+                    
                 }
             }
 
