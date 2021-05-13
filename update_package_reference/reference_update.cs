@@ -418,7 +418,7 @@ namespace update_package_reference
 
                     if (verbose)
                     {
-                        Console.WriteLine("Found {0} matching packages", packageName);
+                        Console.WriteLine("Found {0} matching packages", foundPackages.Count);
                     }
 
                     // find which match is the highest version (there should be only one match as this is
