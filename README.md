@@ -20,6 +20,7 @@
 
 |Version|Notes|
 |---|---|
+| v1.3.0.0 | Added two new options: **r** or **readversion** to see which versions of a package are being referenced and **n** or **normalize** to make all projects reference the highest reference amongst all specified project files. |
 | v1.2.0.0 | A new **e** or **explicit** parameter can be used to specify an exact version number or version range.  Also added **exact** option for discovered package versions. |
 | v1.1.0.0 | Now supports .NET Standard projects.  Tags are now optional - if no tag is provided the package ID is used for the tag.  The utility was doing case sensitive searches against packages returned by Nuget/Artifactory, resulting in a No Packages Found error if casing wasn't exact.  This has been fixed.  |
 | v1.0.0.0 | Initial Release. |
@@ -84,6 +85,8 @@ The Package Manager Console **Update-Package** command accepts the ID (name) of 
 | v | verbose | (optional) This parameter puts **update_package_reference** into verbose mode. |
 | x | exact | (optional) If exact is specified, projects are updated to accept only the exact highest version found in the online search - no higher or lower versions will be accepted (i.e. "[x.y.z]" instead of "x.y.z" ) |
 | e | explicit | (optional) Allows explicit version number references or version ranges to be provided.  If an explicit version is provided, **tag**, **source** and **exact** are ignored, and no online package search is attempted. |
+| r | readversion | (optional) outputs the package version number referenced by the specified project file(s).  Im multiple project files are specified/implied, the highest/most recent version number is noted.  **dryrun**, **exact**, **explicit**, **source**, and **tag** are ignored as no project changes are made, and no online search is performed. |
+| n | normalize | (optional) determines the highest/most recent version of a package in the specified project file(s) and modified all project files to reference that version. **tag**, **source** and **exact** are ignored if provided. |
 
 **Example 1**: - do a practice run of updating all projects in GCPro to use the latest version of the extron.pro.communication.control package:
 

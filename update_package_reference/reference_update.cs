@@ -55,6 +55,12 @@ namespace update_package_reference
             [Option('e', "explicit", Required = false, HelpText = "The version of the package that is to be referenced.  This allows for explicit version ranges to be specified.  If an exact version is provided no online package seatch is performed - tag and source options are ignored if provided.")]
             public string Version { get; set; }
 
+            [Option('r', "readversion", Required = false, HelpText = "Inspects the specified project file(s) and prints all versions of the package being referenced.  dryrun, tag, source, exact and explicit are ignored if provided.")]
+            public bool ReadVersion { get; set; }
+
+            [Option('n', "normalize", Required = false, HelpText = "Finds the highest version of the package referenced in the project file(s), then ensures all references specify that version.  tag, source, exact and explicit are ignored if provided.")]
+            public bool Normalize { get; set; }
+
 
 
             //[Option('e', "exclude", Separator = ',',  Required = false, HelpText = "Names a folder to be excluded in the csproj search.  Absolute Paths only.  May be specified multiple times.")]
@@ -225,6 +231,8 @@ namespace update_package_reference
 
             List<string> noMatchingReference = new List<string>();
 
+            Console.WriteLine("Updating {0} references to {1}...", packageName, packageVersionStr);
+
             foreach (string projFile in projectFiles)
             {
                 try
@@ -243,26 +251,43 @@ namespace update_package_reference
                         newProjectFile += packageVersionStr; // Using the string instead of rendering the version object.
                         newProjectFile += stuff.Substring(pkgRef.Groups["verRef"].Index + pkgRef.Groups["verRef"].Value.Length);
 
+                        //if (pkgRef.Groups["verRef"].Value.Equals(packageVersionStr) == true)
+
                         if (dryrun)
                         {
-                            Console.WriteLine("Dry Run: Would have updated {0} ({1}) PackageReference of {2} from {3} to {4}.  File not changed.", projFile, projType, packageName, pkgRef.Groups["verRef"].Value, packageVersionStr);
+                            if (pkgRef.Groups["verRef"].Value.Equals(packageVersionStr) == false)
+                            {
+                                Console.WriteLine("Dry Run: Would have updated {0} ({1}) PackageReference of {2} from {3} to {4}.  File not changed.", projFile, projType, packageName, pkgRef.Groups["verRef"].Value, packageVersionStr);
+                            }
+                            else if (verbose)
+                            {
+                                Console.WriteLine("Dry Run: {0} ({1}) reference is current {2}.", projFile, projType, pkgRef.Groups["verRef"].Value);
+                            }
                         }
                         else
                         {
-                            Console.WriteLine("Updating {0} ({1}) PackageReference of {2} from {3} to {4}.", projFile, projType, packageName, pkgRef.Groups["verRef"].Value, packageVersionStr);
-                            try
+                            if (pkgRef.Groups["verRef"].Value.Equals(packageVersionStr) == false)
                             {
-                                File.WriteAllText(projFile, newProjectFile);
+                                Console.WriteLine("Updating {0} ({1}) PackageReference of {2} from {3} to {4}.", projFile, projType, packageName, pkgRef.Groups["verRef"].Value, packageVersionStr);
+                                try
+                                {
+                                    File.WriteAllText(projFile, newProjectFile);
+                                }
+                                catch
+                                {
+                                    Console.WriteLine("Failed to update {0} ({1}).  File locked or read-only?", projFile, projType);
+                                    retVal = 4;
+                                }
                             }
-                            catch
+                            else if (verbose)
                             {
-                                Console.WriteLine("Failed to update {0} ({1}).  File locked or read-only?", projFile, projType);
-                                retVal = 4;
+                                Console.WriteLine("{0} ({1}) reference is current {2}.", projFile, projType, pkgRef.Groups["verRef"].Value);
                             }
+
                         }
                         continue;
                     }
-                    else
+                    else if (verbose)
                     {
                         noMatchingReference.Add(string.Format("No matching reference found in {0} ({1}).  File not changed.", projFile, projType));
                         //Console.WriteLine("No matching reference found in {0} ({1}).  File not changed.", projFile, projType);
@@ -284,6 +309,78 @@ namespace update_package_reference
 
 
 
+        internal Tuple<int, string> GetHighestReference(string[] projectFiles, string packageName, bool verbose)
+        {
+            int retVal = 0;
+            // This regex will find package references in .NET Standard projects
+            // <PackageReference\s+Include="Newtonsoft.Json"\s+Version=\"(?<verRef>[\[(]?[\d.,*]+[\])]?)\"\s+\/>
+            //
+            // This regex will find package references in .NET Framework projects
+            // <PackageReference Include=\"Newtonsoft.Json\">\s+(<Version>)(?<verRef>[\[(]?[\d.,*]+[\])]?)(<\/Version>)\s+<\/PackageReference>
+
+            string frameworkPattern = String.Format("<PackageReference Include=\"{0}\">\\s+(<Version>)(?<verRef>[\\[(]?[\\d.,*]+[\\])]?)(<\\/Version>)\\s+<\\/PackageReference>", packageName.Replace(".", "\\."));
+            Regex frameworkRegex = new Regex(frameworkPattern);
+
+            string standardPattern = String.Format("<PackageReference\\s+Include=\"{0}\"\\s+Version=\"(?<verRef>[\\[(]?[\\d.,*]+[\\])]?)\"\\s+\\/>", packageName.Replace(".", "\\."));
+            Regex standardRegex = new Regex(standardPattern);
+
+            List<string> noMatchingReference = new List<string>();
+
+            Dictionary<string, string> referencedVersions = new Dictionary<string, string>();
+
+            string highestReference = "";
+
+            foreach (string projFile in projectFiles)
+            {
+                try
+                {
+                    string stuff = File.ReadAllText(projFile);
+                    Match pkgRef = frameworkRegex.Match(stuff);
+                    if (!pkgRef.Success)
+                    {
+                        pkgRef = standardRegex.Match(stuff);
+                    }
+                    if (pkgRef.Success)
+                    {
+                        string verStr = pkgRef.Groups["verRef"].Value;
+
+                        referencedVersions.Add(projFile, verStr); // = new Dictionary<string, string>();
+
+                        if ( string.IsNullOrEmpty(highestReference) || highestReference.CompareTo(verStr) < 0 )
+                        {
+                            highestReference = verStr;
+                        }
+                    }
+                }
+                catch
+                {
+                    Console.WriteLine("Error while processing {0}", projFile);
+                    retVal = 4;
+                }
+            }
+
+            if (referencedVersions.Count > 0)
+            {
+                Console.WriteLine("{0} references:", packageName);
+
+                foreach (var kvp in referencedVersions)
+                {
+                    Console.WriteLine("    {0}    {1}", kvp.Value, kvp.Key);
+                }
+
+                Console.WriteLine("\nHigest Reference found: {0}", highestReference);
+            }
+            else
+            {
+                Console.WriteLine("No references to {0} found.", packageName);
+
+            }
+
+            return new Tuple<int, string>(retVal, highestReference);
+        }
+
+
+
         internal int Run(string[] args)
         {
             int retVal = 0;
@@ -298,6 +395,9 @@ namespace update_package_reference
             string sourceRepo = "";
             string versionRange = "";
             bool explicitVersionReference = false;
+
+            bool findHighestReference = false;
+            bool normalizeToHighestReference = false;
             //IEnumerable<string> noScan = new List<string>();
 
             parseErr = false;
@@ -314,6 +414,8 @@ namespace update_package_reference
                        sourceRepo = o.Source;
                        versionRange = o.Version;
                        exact = o.exact;
+                       findHighestReference = o.ReadVersion;
+                       normalizeToHighestReference = o.Normalize;
 
                        if (string.IsNullOrEmpty(versionRange) == false)
                        {
@@ -338,7 +440,15 @@ namespace update_package_reference
             Console.WriteLine("sourceRepo:               {0}",sourceRepo);
             Console.WriteLine("versionRange:             {0}",versionRange);
             Console.WriteLine("explicitVersionReference: {0}",explicitVersionReference);
+
+
+            Console.WriteLine("readHighest:              {0}", findHighestReference);
+            Console.WriteLine("normalize:                {0}", normalizeToHighestReference);
+
 #endif
+
+
+            //GetHighestReference
 
             if (parseErr == true)
             {
@@ -354,6 +464,31 @@ namespace update_package_reference
                         Console.Write(", looking in {0}", sourceRepo);
                     }
                     Console.Write("\n");
+                }
+
+                if ( findHighestReference || normalizeToHighestReference )
+                {
+                    Tuple<int, string[]> exresults = GetProjectFiles(projectFilespec, verbose);
+                    retVal = exresults.Item1;
+                    if (exresults.Item1 != 0)
+                    {
+                        goto get_outta_dodge;
+                    }
+
+                    Tuple<int, string> readresults =  GetHighestReference(exresults.Item2, packageName, verbose);
+                    retVal = readresults.Item1;
+                    if (readresults.Item1 != 0)
+                    {
+                        goto get_outta_dodge;
+                    }
+
+                    string highest = readresults.Item2;
+
+                    if ( normalizeToHighestReference )
+                    {
+                        retVal = UpdateProjectFiles(exresults.Item2, highest, packageName, verbose, dryrun);
+                        goto get_outta_dodge;
+                    }
                 }
 
                 List<MatchingPackage> foundPackages = new List<MatchingPackage>();
