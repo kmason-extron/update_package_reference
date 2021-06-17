@@ -12,6 +12,9 @@ using System.Text.RegularExpressions;
 
 using CommandLine;
 
+// -d -c C:\projects\Control\Extron.Configuration.SDK.BugFixes\Components\Extron.Configuration.BuildUpload\*.csproj -p extron.pro.communication.control -t pro.communication --verbose
+// -p extron.diagnostics -d -v -c c:\projects\control\gcpro\*.csproj -r
+
 
 namespace update_package_reference
 {
@@ -87,8 +90,9 @@ namespace update_package_reference
         {
             string verStr;
             Version ver;
+            bool truncated;
 
-            internal MatchingPackage() { verStr = ""; ver = new Version(); }
+            internal MatchingPackage() { verStr = ""; ver = new Version(0,0,0,0); truncated = false; }
 
             internal string PackageName { set; get; }
             internal string PackageVersionStr
@@ -96,7 +100,28 @@ namespace update_package_reference
                 set
                 {
                     verStr = value;
-                    ver = new Version(verStr);
+                    try
+                    {
+                        ver = new Version(verStr);
+                    }
+                    catch
+                    {
+                        // we probably ran into a semantic version value.  We don't support this.
+                        // Parse manually and make a note.
+                        string[] segments = verStr.Split('-');
+                        if ( segments.Length > 0)
+                        {
+                            try
+                            {
+                                ver = new Version(segments[0]);
+                                truncated = true;
+                            }
+                            catch
+                            {
+                                ver = new Version(0, 0, 0, 0);
+                            }
+                        }
+                    }
                 }
                 get
                 {
@@ -110,6 +135,30 @@ namespace update_package_reference
                 {
                     return ver;
                 }
+            }
+
+            internal bool IsFeatureBuild()
+            {
+                if ( ver.Major == 99 || ver.Major == 999 || ver.Major == 9999 )
+                {
+                    return true;
+                }
+                try
+                {
+                    char[] sep = { '.', '-', ':' };
+                    string[] fields = verStr.Split(sep);
+                    if (fields.Length > 0)
+                    {
+                        int val = int.Parse(fields[0]);
+                        if (val == 99 || val == 999 || val == 9999)
+                        {
+                            return true;
+                        }
+                    }
+                }
+                catch { }
+
+                return false;
             }
 
         }
@@ -319,10 +368,10 @@ namespace update_package_reference
             // <PackageReference Include=\"Newtonsoft.Json\">\s+(<Version>)(?<verRef>[\[(]?[\d.,*]+[\])]?)(<\/Version>)\s+<\/PackageReference>
 
             string frameworkPattern = String.Format("<PackageReference Include=\"{0}\">\\s+(<Version>)(?<verRef>[\\[(]?[\\d.,*]+[\\])]?)(<\\/Version>)\\s+<\\/PackageReference>", packageName.Replace(".", "\\."));
-            Regex frameworkRegex = new Regex(frameworkPattern);
+            Regex frameworkRegex = new Regex(frameworkPattern, RegexOptions.IgnoreCase);
 
             string standardPattern = String.Format("<PackageReference\\s+Include=\"{0}\"\\s+Version=\"(?<verRef>[\\[(]?[\\d.,*]+[\\])]?)\"\\s+\\/>", packageName.Replace(".", "\\."));
-            Regex standardRegex = new Regex(standardPattern);
+            Regex standardRegex = new Regex(standardPattern, RegexOptions.IgnoreCase);
 
             List<string> noMatchingReference = new List<string>();
 
@@ -401,7 +450,6 @@ namespace update_package_reference
             //IEnumerable<string> noScan = new List<string>();
 
             parseErr = false;
-
 
             Parser.Default.ParseArguments<FWUpdateCLIOptions>(args)
                    .WithParsed<FWUpdateCLIOptions>(o =>
@@ -561,16 +609,30 @@ namespace update_package_reference
                     MatchingPackage highest = foundPackages[0];
                     foreach (MatchingPackage match in foundPackages)
                     {
-                        if ( match.PackageVersion > highest.PackageVersion )
+                        if (match.IsFeatureBuild() == false)
                         {
-                            highest = match;
+                            //if (match.PackageVersion > highest.PackageVersion)
+                            if (highest.IsFeatureBuild() || (match.PackageVersion > highest.PackageVersion))
+                            {
+                                highest = match;
+                            }
+                            if (verbose)
+                            {
+                                Console.WriteLine("    {0} {1}", match.PackageName, match.PackageVersionStr);
+                            }
                         }
-                        if (verbose)
+                        else
                         {
-                            Console.WriteLine("    {0} {1}", match.PackageName, match.PackageVersionStr);
+                            Console.WriteLine("    {0} {1} - Ignoring Feature Build", match.PackageName, match.PackageVersionStr);
                         }
                     }
 
+                    if ( highest.IsFeatureBuild() )
+                    {
+                        Console.WriteLine("Selected package: {0} {1}   ({2}) is a feature release.  Aborting.", highest.PackageName, highest.PackageVersionStr, highest.PackageVersion.ToString());
+                        retVal = 6; // no matches found
+                        goto get_outta_dodge;
+                    }
 
                     if (verbose)
                     {

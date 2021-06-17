@@ -20,10 +20,11 @@
 
 |Version|Notes|
 |---|---|
-| v1.3.0.0 | Added two new options: **r** or **readversion** to see which versions of a package are being referenced and **n** or **normalize** to make all projects reference the highest reference amongst all specified project files. |
-| v1.2.0.0 | A new **e** or **explicit** parameter can be used to specify an exact version number or version range.  Also added **exact** option for discovered package versions. |
-| v1.1.0.0 | Now supports .NET Standard projects.  Tags are now optional - if no tag is provided the package ID is used for the tag.  The utility was doing case sensitive searches against packages returned by Nuget/Artifactory, resulting in a No Packages Found error if casing wasn't exact.  This has been fixed.  |
-| v1.0.0.0 | Initial Release. |
+| 1.4.0.0 | Fixed an unwanted behavior where projects were updated to reference feature builds found in the package search.  Major versions 99, 999 or 9999 are ignored.  Also fixed a potential crash bug when reading package version numbers (this utility currently does not support semantic versioning).   ---|
+| 1.3.0.0 | Added two new options: **r** or **readversion** to see which versions of a package are being referenced and **n** or **normalize** to make all projects reference the highest reference amongst all specified project files. |
+| 1.2.0.0 | A new **e** or **explicit** parameter can be used to specify an exact version number or version range.  Also added **exact** option for discovered package versions. |
+| 1.1.0.0 | Now supports .NET Standard projects.  Tags are now optional - if no tag is provided the package ID is used for the tag.  The utility was doing case sensitive searches against packages returned by Nuget/Artifactory, resulting in a No Packages Found error if casing wasn't exact.  This has been fixed.  |
+| 1.0.0.0 | Initial Release. |
 
 ---
 
@@ -75,6 +76,8 @@ Extron Artifactory users should be set up to work with Virtual Repositories as a
 
 The Package Manager Console **Update-Package** command accepts the ID (name) of a package and modify's any the current solution's projects that reference that package to make use of the latest version.  **update_package_reference** works in much the same way, but it doesn't have the benefit of loaded solution and project files so it accepts parameters that help it along.
 
+> Note: This utility currently does not work well with semantic versioning.
+
 |shorthand|name|description|
 |---|---|---|
 | c | csproj | The project file(s) that will have their references to the specified package updated.  Wildcards are supported.  Only project files with **PackageReference**s that include the named package will be modified. |
@@ -124,6 +127,7 @@ As long as you include the -d option these are safe to try.  Changes are made on
 | 3 | No matching project files found |
 | 4 | Failed to update one or more project files (file locked, read-only or ???) |
 | 5 | Error while scanning specified folder for project files |
+| 6 | Only Feature builds were found.  We don't auto-update projects to feature builds. |
 
 ## Search Tags ##
 
