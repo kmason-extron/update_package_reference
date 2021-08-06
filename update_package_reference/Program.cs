@@ -14,6 +14,7 @@ namespace update_package_reference
 
         static int Main(string[] args)
         {
+            //Run all the bacon
             reference_update updater = new reference_update();
             return updater.Run(args);
         }
